@@ -3,6 +3,7 @@ import { LuminousHall } from './luminousHall/LuminousHall';
 import { InkCurrent } from './ink/InkCurrent';
 import { Garden } from './garden/Garden';
 import { Celestial } from './celestial/Celestial';
+import { Voyage } from './voyage/Voyage';
 
 export const modeRegistry: ModeDefinition[] = [
   {
@@ -30,9 +31,18 @@ export const modeRegistry: ModeDefinition[] = [
   {
     id: 'celestial-mechanics',
     name: 'Celestial Mechanics',
-    description: 'Voices orbit the night sky with trails; harmony aligns them, dissonance scatters.',
+    description:
+      'A living spiral galaxy: voices swoop around the burning core, figuration births stars.',
     available: true,
     create: () => new Celestial(),
+  },
+  {
+    id: 'the-voyage',
+    name: 'The Voyage',
+    description:
+      'Fly through deep space with the voices as silk ribbons weaving past stars whose planets orbit to the music.',
+    available: true,
+    create: () => new Voyage(),
   },
 ];
 

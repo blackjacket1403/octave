@@ -53,5 +53,9 @@ Four modes share the one analysis engine, selectable from the transport bar:
    onsets drop blooming ink, swells flood the sheet.
 3. **The Growing Garden** — phrases grow stems, leaves, and golden blooms on parchment into a
    persistent canvas; the finished piece is a grown landscape of the work's structure.
-4. **Celestial Mechanics** — voices orbit the night sky with light trails; settled harmony
-   pulls them into a shared plane, busy dissonance scatters them.
+4. **Celestial Mechanics** — a living spiral galaxy: the disk's rotation, glitter, and core
+   fire follow the music while the voices swoop around the burning centre leaving trails;
+   fast figuration births showers of new stars.
+5. **The Voyage** — fly forward through deep space; the voices are silk ribbons weaving and
+   slaloming past star systems, each star tuned to a voice and its planets revolving faster
+   the louder that voice plays.

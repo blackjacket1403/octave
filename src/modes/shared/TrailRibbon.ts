@@ -106,6 +106,15 @@ export class TrailRibbon {
     this.mesh.frustumCulled = false;
   }
 
+  /** Sweep the whole trail through space (for fly-through worlds). */
+  drift(dx: number, dy: number, dz: number): void {
+    for (const s of this.samples) {
+      s.x += dx;
+      s.y += dy;
+      s.z += dz;
+    }
+  }
+
   reset(point: THREE.Vector3, time: number): void {
     for (const s of this.samples) s.copy(point);
     this.lastEmit = time;

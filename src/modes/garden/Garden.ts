@@ -6,28 +6,35 @@ import { EnvelopeFollower, clamp, clamp01 } from '../../audio/smoothing';
 
 /**
  * Mode 3 — The Growing Garden.
- * Phrases grow as living forms on parchment: each voice is a shoot whose
- * stem lengthens while it sounds, curling with its pitch; onsets put out
- * leaves; climaxes open golden blooms. Everything is painted into a
- * persistent canvas that is never erased — by the end of the piece the
- * whole work's structure stands as a grown landscape.
+ * Phrases grow as climbing vines on parchment: each voice is a tapering
+ * tendril whose curvature follows its pitch, curling into tight spirals
+ * when the music ornaments, putting out paired leaves as it climbs, and
+ * opening petaled blooms at climaxes. Vines finish, and new shoots rise
+ * where the voice now sounds. The canvas is never erased — the finished
+ * piece stands as a grown landscape of the work's structure.
  */
 
-const MAX_DEPOSITS = 96; // strokes painted per frame
-const BLOOM_COOLDOWN = 1.6;
+const MAX_STEMS = 96; // stem strokes painted per frame
+const MAX_FOLIAGE = 64; // leaves/petals painted per frame
+const BLOOM_COOLDOWN = 3.5;
 
 const VOICE_COLORS = [
-  new THREE.Color('#7a5a33'), // bass — walnut stems
-  new THREE.Color('#8a7d3a'), // tenor — olive
-  new THREE.Color('#5f8048'), // alto — moss green
-  new THREE.Color('#46808a'), // soprano — teal tendrils
-  new THREE.Color('#a06f9d'), // brilliance — heather violet
+  new THREE.Color('#6e5230'), // bass — walnut
+  new THREE.Color('#7d7434'), // tenor — olive
+  new THREE.Color('#4f7a40'), // alto — moss green
+  new THREE.Color('#3f7a80'), // soprano — teal tendrils
+  new THREE.Color('#96689b'), // brilliance — wisteria
 ];
-const LEAF_TINT = new THREE.Color('#94a456');
-const BLOOM_GOLD = new THREE.Color('#c79a3b');
+const LEAF_TINT = new THREE.Color('#9cb55e');
+const BLOOM_GOLD = new THREE.Color('#cf9d35');
+const BLOOM_HEART = new THREE.Color('#8a5a18');
 const SOIL = new THREE.Color('#3a2e22');
 
-const strokeVertex = /* glsl */ `
+// ---------------------------------------------------------------------------
+// shaders
+// ---------------------------------------------------------------------------
+
+const stemVertex = /* glsl */ `
   varying vec2 vUv;
   varying vec3 vColor;
   void main() {
@@ -41,16 +48,38 @@ const strokeVertex = /* glsl */ `
   }
 `;
 
-const strokeFragment = /* glsl */ `
+const stemFragment = /* glsl */ `
   uniform float uOpacity;
   varying vec2 vUv;
   varying vec3 vColor;
   void main() {
     vec2 c = (vUv - 0.5) * 2.0;
     float d = length(c);
-    float a = smoothstep(1.0, 0.45, d) * uOpacity;
+    float a = smoothstep(1.0, 0.5, d) * uOpacity;
     if (a <= 0.01) discard;
-    gl_FragColor = vec4(vColor, a);
+    // round stroke with a lit edge, like a turned stem catching light
+    vec3 col = vColor * (0.9 + 0.18 * smoothstep(0.4, -0.6, c.y));
+    gl_FragColor = vec4(col, a);
+  }
+`;
+
+const leafVertex = stemVertex;
+
+const leafFragment = /* glsl */ `
+  uniform float uOpacity;
+  varying vec2 vUv;
+  varying vec3 vColor;
+  void main() {
+    float along = vUv.x;
+    float across = (vUv.y - 0.5) * 2.0;
+    // pointed leaf silhouette: widest a third of the way up, sharp tip
+    float env = pow(max(sin(3.14159 * pow(along, 0.72)), 0.0), 0.8);
+    float a = (1.0 - smoothstep(env * 0.72, env, abs(across))) * uOpacity;
+    if (a <= 0.012) discard;
+    // midrib and gentle shading toward the edges
+    float rib = smoothstep(0.0, 0.16, abs(across));
+    vec3 col = vColor * (0.78 + 0.22 * rib) * (0.85 + 0.15 * along);
+    gl_FragColor = vec4(col, a);
   }
 `;
 
@@ -104,17 +133,23 @@ const tipFragment = /* glsl */ `
   }
 `;
 
+// ---------------------------------------------------------------------------
+
 interface Turtle {
   x: number;
   y: number;
   angle: number; // radians, π/2 = straight up
-  curl: number;
-  sinceLeaf: number;
+  kSlow: number; // smooth curvature, rad per unit length
+  curlRemaining: number; // arc length left in the current tendril curl
+  curlSign: number;
+  len: number; // length grown on this shoot
+  maxLen: number;
+  leafAcc: number; // distance since the last leaf pair
   sinceBloom: number;
   leafSide: number;
 }
 
-interface Deposit {
+interface Stroke {
   x: number;
   y: number;
   rot: number;
@@ -131,16 +166,18 @@ export class Garden implements Mode {
   private rt: THREE.WebGLRenderTarget | null = null;
   private strokeScene = new THREE.Scene();
   private strokeCam = new THREE.OrthographicCamera(-1, 1, 1, -1, -1, 1);
-  private strokes!: THREE.InstancedMesh;
-  private strokeMat!: THREE.ShaderMaterial;
+  private stems!: THREE.InstancedMesh;
+  private foliage!: THREE.InstancedMesh;
+  private stemMat!: THREE.ShaderMaterial;
+  private leafMat!: THREE.ShaderMaterial;
   private compositeMat!: THREE.ShaderMaterial;
   private tipMats: THREE.ShaderMaterial[] = [];
   private geometries: THREE.BufferGeometry[] = [];
 
   private turtles: Turtle[] = [];
   private salience: EnvelopeFollower[] = [];
-  private deposits: Deposit[] = [];
-  private depositColors: THREE.Color[] = [];
+  private stemQueue: Stroke[] = [];
+  private leafQueue: Stroke[] = [];
   private time = 0;
   private aspect = 16 / 9;
   private needsClear = true;
@@ -155,31 +192,43 @@ export class Garden implements Mode {
     this.scene = scene;
     this.renderer = renderer;
     this.aspect = camera.aspect;
-    for (let i = 0; i < MAX_DEPOSITS; i++) this.depositColors.push(new THREE.Color());
 
-    // persistent canvas
     this.createTarget();
 
-    // stroke painter (instanced soft ellipses)
     const quad = new THREE.PlaneGeometry(1, 1);
-    this.strokeMat = new THREE.ShaderMaterial({
-      vertexShader: strokeVertex,
-      fragmentShader: strokeFragment,
-      uniforms: { uOpacity: { value: 0.88 } },
+    this.stemMat = new THREE.ShaderMaterial({
+      vertexShader: stemVertex,
+      fragmentShader: stemFragment,
+      uniforms: { uOpacity: { value: 0.92 } },
       transparent: true,
       depthWrite: false,
       depthTest: false,
     });
-    this.strokes = new THREE.InstancedMesh(quad, this.strokeMat, MAX_DEPOSITS);
-    this.strokes.instanceColor = new THREE.InstancedBufferAttribute(
-      new Float32Array(MAX_DEPOSITS * 3),
+    this.stems = new THREE.InstancedMesh(quad, this.stemMat, MAX_STEMS);
+    this.stems.instanceColor = new THREE.InstancedBufferAttribute(
+      new Float32Array(MAX_STEMS * 3),
       3,
     );
-    this.strokes.frustumCulled = false;
-    this.strokes.count = 0;
-    this.strokeScene.add(this.strokes);
+    this.stems.frustumCulled = false;
+    this.stems.count = 0;
 
-    // composite quad in the main scene
+    this.leafMat = new THREE.ShaderMaterial({
+      vertexShader: leafVertex,
+      fragmentShader: leafFragment,
+      uniforms: { uOpacity: { value: 0.9 } },
+      transparent: true,
+      depthWrite: false,
+      depthTest: false,
+    });
+    this.foliage = new THREE.InstancedMesh(quad, this.leafMat, MAX_FOLIAGE);
+    this.foliage.instanceColor = new THREE.InstancedBufferAttribute(
+      new Float32Array(MAX_FOLIAGE * 3),
+      3,
+    );
+    this.foliage.frustumCulled = false;
+    this.foliage.count = 0;
+    this.strokeScene.add(this.stems, this.foliage);
+
     const screen = new THREE.PlaneGeometry(2, 2);
     this.compositeMat = new THREE.ShaderMaterial({
       vertexShader: compositeVertex,
@@ -196,7 +245,6 @@ export class Garden implements Mode {
     composite.renderOrder = 50;
     this.group.add(composite);
 
-    // live glowing growth tips
     const tipGeo = new THREE.PlaneGeometry(1, 1);
     for (let b = 0; b < BAND_COUNT; b++) {
       const mat = new THREE.ShaderMaterial({
@@ -220,7 +268,7 @@ export class Garden implements Mode {
       tip.renderOrder = 51;
       this.group.add(tip);
 
-      this.turtles.push(this.newShoot(b, 0));
+      this.turtles.push(this.newShoot(0));
       this.salience.push(new EnvelopeFollower(600, 1600));
     }
 
@@ -244,23 +292,30 @@ export class Garden implements Mode {
     this.needsClear = true;
   }
 
-  private newShoot(band: number, pan: number): Turtle {
+  private newShoot(pan: number): Turtle {
     return {
-      x: clamp(pan * this.aspect * 0.7 + (this.rng() - 0.5) * this.aspect * 0.7, -this.aspect * 0.92, this.aspect * 0.92),
+      x: clamp(
+        pan * this.aspect * 0.7 + (this.rng() - 0.5) * this.aspect * 1.1,
+        -this.aspect * 0.92,
+        this.aspect * 0.92,
+      ),
       y: -0.99,
-      angle: Math.PI / 2 + (this.rng() - 0.5) * 0.3,
-      curl: 0,
-      sinceLeaf: 0,
-      sinceBloom: band, // stagger first blooms
+      angle: Math.PI / 2 + (this.rng() - 0.5) * 0.5,
+      kSlow: (this.rng() - 0.5) * 2,
+      curlRemaining: 0,
+      curlSign: 1,
+      len: 0,
+      maxLen: 1.2 + this.rng() * 1.1,
+      leafAcc: 0.02 + this.rng() * 0.03,
+      sinceBloom: this.rng() * 2,
       leafSide: this.rng() > 0.5 ? 1 : -1,
     };
   }
 
-  /** A dark soil line so the first shoots have ground to stand in. */
   private sowSoil(): void {
     for (let i = 0; i < 40; i++) {
       const t = i / 39;
-      this.deposits.push({
+      this.stemQueue.push({
         x: (t * 2 - 1) * this.aspect,
         y: -0.985 + (this.rng() - 0.5) * 0.02,
         rot: (this.rng() - 0.5) * 0.4,
@@ -279,7 +334,6 @@ export class Garden implements Mode {
       const band = frame.bands[b];
       const t = this.turtles[b];
       const sal = this.salience[b].process(frame.salientBand === b ? frame.salience : 0, dtMs);
-      t.sinceLeaf += dt;
       t.sinceBloom += dt;
 
       const tipMat = this.tipMats[b];
@@ -290,74 +344,102 @@ export class Garden implements Mode {
 
       if (band.energy < 0.03 || !frame.playing) continue;
 
-      // grow: speed from loudness; curl wanders with pitch and texture but
-      // always eases back toward vertical, so stems wave instead of keeling
-      const step = band.energy * dt * (0.11 + sal * 0.05);
-      const wander =
-        (band.pitch - 0.5) * 2.2 +
-        Math.sin(this.time * (0.7 + b * 0.13) + b * 2.1) * (0.8 + frame.flux * 1.4);
-      t.curl += (wander - t.curl * 1.6) * dt;
-      t.curl = clamp(t.curl, -1.2, 1.2);
-      t.angle = Math.PI / 2 + t.curl * 0.75;
+      // ---- vine motion: smooth curvature, arc-length based -----------------
+      const step = band.energy * dt * (0.17 + sal * 0.06);
+
+      // ornamented, busy playing occasionally throws a tendril curl
+      if (t.curlRemaining <= 0 && this.rng() < (0.012 + frame.flux * 0.055) * dt * 10) {
+        t.curlRemaining = 0.05 + this.rng() * 0.06;
+        t.curlSign = this.rng() > 0.5 ? 1 : -1;
+      }
+      let k = t.kSlow;
+      if (t.curlRemaining > 0) {
+        t.curlRemaining -= step;
+        k += t.curlSign * (24 + frame.flux * 14); // a deliberate little spiral
+      } else {
+        // pitch steers; the vine breathes side to side; verticality is home
+        const kTarget =
+          (band.pitch - 0.5) * 5 +
+          Math.sin(this.time * (0.5 + b * 0.11) + b * 2.6) * (1.6 + frame.flux * 2.2);
+        t.kSlow += (kTarget - t.kSlow) * Math.min(1, dt * 1.8);
+        // lean back toward upright so vines climb rather than keel over
+        const upright = Math.PI / 2 - t.angle;
+        k += clamp(upright, -1.2, 1.2) * 2.2;
+      }
+      t.angle += k * step;
 
       const nx = t.x + Math.cos(t.angle) * step;
       const ny = t.y + Math.sin(t.angle) * step;
+      t.len += step;
+      t.leafAcc += step;
 
-      if (this.deposits.length < MAX_DEPOSITS) {
-        this.deposits.push({
+      // taper: thick at the root, fine at the growing tip
+      const taper = 0.25 + 0.75 * (1 - t.len / t.maxLen);
+      if (this.stemQueue.length < MAX_STEMS) {
+        this.stemQueue.push({
           x: (t.x + nx) / 2,
           y: (t.y + ny) / 2,
           rot: t.angle,
-          len: Math.max(step * 2.6, 0.01),
-          width: 0.009 + band.energy * 0.02 + sal * 0.005,
+          len: Math.max(step * 3, 0.012),
+          width: (0.006 + band.energy * 0.014 + sal * 0.004) * taper,
           color: VOICE_COLORS[b]
             .clone()
-            .lerp(LEAF_TINT, clamp01(band.pitch * 0.4))
-            .offsetHSL(0, 0, sal * 0.08),
+            .offsetHSL(0, 0.04 * Math.sin(t.len * 9), 0.05 * Math.sin(t.len * 23) + sal * 0.07),
         });
       }
       t.x = nx;
       t.y = ny;
 
-      // leaves on attacks; golden blooms at sustained climaxes
+      // ---- foliage ---------------------------------------------------------
       const blooming =
-        band.attackStrength > 0.45 && frame.energySlow > 0.58 && t.sinceBloom > BLOOM_COOLDOWN;
+        band.attackStrength > 0.55 && frame.energySlow > 0.62 && t.sinceBloom > BLOOM_COOLDOWN;
       if (blooming) {
         t.sinceBloom = 0;
-        const petals = 7;
-        const size = 0.025 + band.energy * 0.03;
-        for (let p = 0; p < petals && this.deposits.length < MAX_DEPOSITS; p++) {
-          const a = (p / petals) * Math.PI * 2 + this.rng() * 0.4;
-          this.deposits.push({
-            x: t.x + Math.cos(a) * size * 0.8,
-            y: t.y + Math.sin(a) * size * 0.8,
+        const petals = 6;
+        const size = 0.03 + band.energy * 0.035;
+        for (let p = 0; p < petals && this.leafQueue.length < MAX_FOLIAGE - 1; p++) {
+          const a = (p / petals) * Math.PI * 2 + this.rng() * 0.3;
+          this.leafQueue.push({
+            x: t.x + Math.cos(a) * size * 0.55,
+            y: t.y + Math.sin(a) * size * 0.55,
             rot: a,
-            len: size * 1.9,
-            width: size * 0.85,
-            color: BLOOM_GOLD.clone().offsetHSL(0, 0, (this.rng() - 0.5) * 0.12),
+            len: size * 1.7,
+            width: size * 0.95,
+            color: BLOOM_GOLD.clone().offsetHSL(0, 0, (this.rng() - 0.5) * 0.1),
           });
         }
-      } else if (band.attack && band.attackStrength > 0.12 && t.sinceLeaf > 0.3) {
-        t.sinceLeaf = 0;
+        // flower heart
+        this.stemQueue.push({
+          x: t.x,
+          y: t.y,
+          rot: 0,
+          len: size * 0.55,
+          width: size * 0.55,
+          color: BLOOM_HEART.clone(),
+        });
+      } else if (t.leafAcc > 0.13 && t.len > 0.06) {
+        // generous leaves set sparsely along the climbing vine
+        t.leafAcc = 0;
         t.leafSide *= -1;
-        const la = t.angle + (Math.PI / 2.6) * t.leafSide;
-        const size = 0.016 + band.attackStrength * 0.028;
-        if (this.deposits.length < MAX_DEPOSITS) {
-          this.deposits.push({
-            x: t.x + Math.cos(la) * size,
-            y: t.y + Math.sin(la) * size,
+        const leafLen = (0.045 + band.energy * 0.04) * (0.55 + 0.45 * (1 - t.len / t.maxLen));
+        const la = t.angle + (Math.PI / 3.1) * t.leafSide + (this.rng() - 0.5) * 0.2;
+        if (this.leafQueue.length < MAX_FOLIAGE) {
+          this.leafQueue.push({
+            x: t.x + Math.cos(la) * leafLen * 0.48,
+            y: t.y + Math.sin(la) * leafLen * 0.48,
             rot: la,
-            len: size * 2.6,
-            width: size,
-            color: VOICE_COLORS[b].clone().lerp(LEAF_TINT, 0.65),
+            len: leafLen,
+            width: leafLen * 0.55,
+            color: LEAF_TINT.clone()
+              .lerp(VOICE_COLORS[b], 0.3)
+              .offsetHSL(0, 0.05, 0.04 + this.rng() * 0.05),
           });
         }
       }
 
-      // off the page: the phrase is spent; seed a new shoot where the voice
-      // currently sits in the stereo field
-      if (t.y > 0.94 || Math.abs(t.x) > this.aspect * 0.96) {
-        this.turtles[b] = this.newShoot(b, band.pan);
+      // shoot finished or off the page: a new vine rises where the voice is
+      if (t.len > t.maxLen || t.y > 0.94 || Math.abs(t.x) > this.aspect * 0.96) {
+        this.turtles[b] = this.newShoot(band.pan);
       }
     }
 
@@ -365,25 +447,31 @@ export class Garden implements Mode {
     this.compositeMat.uniforms.uWarmth.value = clamp01(frame.energySlow * 1.2);
   }
 
-  /** Flush this frame's deposits into the persistent canvas. */
-  private paint(): void {
-    if (!this.rt) return;
-    const n = Math.min(this.deposits.length, MAX_DEPOSITS);
+  private fill(mesh: THREE.InstancedMesh, queue: Stroke[]): void {
+    const n = queue.length;
     for (let i = 0; i < n; i++) {
-      const d = this.deposits[i];
+      const d = queue[i];
       this.dummy.position.set(d.x, d.y, 0);
       this.dummy.rotation.set(0, 0, d.rot);
       this.dummy.scale.set(d.len, d.width, 1);
       this.dummy.updateMatrix();
-      this.strokes.setMatrixAt(i, this.dummy.matrix);
-      this.strokes.setColorAt(i, d.color);
+      mesh.setMatrixAt(i, this.dummy.matrix);
+      mesh.setColorAt(i, d.color);
     }
-    this.strokes.count = n;
-    this.deposits.length = 0;
-    if (n === 0 && !this.needsClear) return;
+    mesh.count = n;
+    queue.length = 0;
+    if (n > 0) {
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
+  }
 
-    this.strokes.instanceMatrix.needsUpdate = true;
-    if (this.strokes.instanceColor) this.strokes.instanceColor.needsUpdate = true;
+  private paint(): void {
+    if (!this.rt) return;
+    const had = this.stemQueue.length + this.leafQueue.length;
+    this.fill(this.stems, this.stemQueue);
+    this.fill(this.foliage, this.leafQueue);
+    if (had === 0 && !this.needsClear) return;
 
     const prevAutoClear = this.renderer.autoClear;
     this.renderer.setRenderTarget(this.rt);
@@ -404,7 +492,7 @@ export class Garden implements Mode {
     this.createTarget();
     this.compositeMat.uniforms.uMap.value = this.rt!.texture;
     this.sowSoil();
-    for (let b = 0; b < BAND_COUNT; b++) this.turtles[b] = this.newShoot(b, 0);
+    for (let b = 0; b < BAND_COUNT; b++) this.turtles[b] = this.newShoot(0);
   }
 
   setQuality(level: number): void {
@@ -422,7 +510,8 @@ export class Garden implements Mode {
     this.rt?.dispose();
     this.rt = null;
     for (const g of this.geometries) g.dispose();
-    this.strokeMat.dispose();
+    this.stemMat.dispose();
+    this.leafMat.dispose();
     this.compositeMat.dispose();
     for (const m of this.tipMats) m.dispose();
   }
