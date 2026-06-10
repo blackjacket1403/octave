@@ -6,6 +6,7 @@ import type { Mode } from './modes/Mode';
 import { getMode, modeRegistry } from './modes/registry';
 import { UI } from './ui/ui';
 import { Library } from './ui/library';
+import { PointerGlow } from './ui/pointerGlow';
 import { renderDemoPiece } from './demo/demoPiece';
 
 // ---------------------------------------------------------------------------
@@ -23,6 +24,16 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 400);
+
+// a light that follows the pointer, above every mode
+const pointerGlow = new PointerGlow();
+scene.add(pointerGlow.points);
+window.addEventListener('pointermove', (e) => {
+  pointerGlow.onMove(
+    (e.clientX / window.innerWidth) * 2 - 1,
+    -((e.clientY / window.innerHeight) * 2 - 1),
+  );
+});
 
 // ---------------------------------------------------------------------------
 // audio: created lazily on first user gesture (autoplay policy)
@@ -237,6 +248,7 @@ function tick(now: number): void {
 
   const frame = analysis ? analysis.update(dtMs) : idleFrame;
   activeMode?.update(frame, dt);
+  pointerGlow.update(dt, renderer.getPixelRatio(), frame.energyFast);
   renderer.render(scene, camera);
 
   if (engine?.hasTrack) ui.setProgress(engine.currentTime, engine.duration);
