@@ -45,4 +45,13 @@ src/
   demo/       offline-rendered ~45s demo piece (oscillators; no copyrighted audio)
 ```
 
-Future modes are stubbed in the registry: Ink and Current, Growing Garden, Celestial Mechanics.
+Four modes share the one analysis engine, selectable from the transport bar:
+
+1. **The Luminous Hall** — first-person at the podium; each voice is a twisting aurora strand
+   of light on the orchestra arc. Crescendos approach; the melody sharpens and sheds sparks.
+2. **Ink and Current** — voices as pigment currents in water on paper; counterpoint braids,
+   onsets drop blooming ink, swells flood the sheet.
+3. **The Growing Garden** — phrases grow stems, leaves, and golden blooms on parchment into a
+   persistent canvas; the finished piece is a grown landscape of the work's structure.
+4. **Celestial Mechanics** — voices orbit the night sky with light trails; settled harmony
+   pulls them into a shared plane, busy dissonance scatters them.

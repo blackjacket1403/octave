@@ -2,16 +2,18 @@ import * as THREE from 'three';
 
 /**
  * One register's voice as an aurora strand: a continuous ribbon of light
- * hanging on the orchestra arc, undulating like a slow bow stroke. The
- * strand is one tessellated strip whose entire shape lives in the vertex
- * shader — the CPU only writes uniforms.
+ * hanging on the orchestra arc. The ribbon is fully three-dimensional —
+ * it twists about its own axis, billows in depth as well as height, and
+ * its waves travel visibly along its length. A thinner companion layer
+ * runs slightly behind it for parallax, like a double bow stroke.
  *
  * Onsets travel outward along the strand as pulses of brightness.
  * The salient strand sharpens, brightens, and sheds fine rising sparks.
  * A dimmed mirror copy provides the floor reflection.
  */
 
-const SEGMENTS = 140;
+const SEGMENTS = 150;
+const LAYERS = 2;
 const MAX_PULSES = 4;
 const SPARK_COUNT = 72;
 
@@ -26,35 +28,48 @@ const strandVertex = /* glsl */ `
   uniform float uAmp;
   uniform float uSpeed;
   uniform float uPhase;
+  uniform float uTwist;
   uniform float uMirror;
+  attribute float aLayer;
   varying float vT;
   varying float vAcross;
+  varying float vDim;
   void main() {
     float t = position.x + 0.5;       // 0..1 along the strand
     float across = position.y * 2.0;  // -1..1 across thickness
+    float ph = uPhase + aLayer * 2.13;
     float ang = uCenterAngle + (t - 0.5) * 2.0 * uHalfAngle;
+    float dist = uDist + (aLayer - 0.5) * 1.7; // companion layer sits deeper
 
-    // slow flag-like undulation; several incommensurate waves so the motion
-    // never repeats and never snaps
-    float w1 = sin(t * 7.3 + uTime * uSpeed + uPhase);
-    float w2 = sin(t * 13.1 - uTime * uSpeed * 0.71 + uPhase * 2.3);
-    float w3 = sin(t * 3.7 + uTime * uSpeed * 0.43 + uPhase * 4.1);
-    float lift = uAmp * (w1 * 0.5 + w2 * 0.26 + w3 * 0.4);
+    vec3 P;
+    P.x = uArcOrigin.x + sin(ang) * dist;
+    P.z = uArcOrigin.z - cos(ang) * dist;
 
-    // the strand bows gently away with distance, thicker mid, tapered ends
+    // travelling waves in all three axes — the light visibly flows along
+    // the ribbon instead of standing still
+    float w1 = sin(t * 4.6 - uTime * uSpeed * 1.5 + ph);
+    float w2 = sin(t * 8.9 + uTime * uSpeed * 0.85 + ph * 2.3);
+    float w3 = sin(t * 2.4 - uTime * uSpeed * 0.5 + ph * 4.1);
+    P.y = uHeight + (aLayer - 0.5) * 0.7 + uAmp * (0.5 * w1 + 0.28 * w2 + 0.38 * w3);
+    P.z += uAmp * (0.7 * sin(t * 3.8 - uTime * uSpeed * 1.05 + ph * 1.7)
+                 + 0.35 * sin(t * 10.3 + uTime * 0.55 + ph));
+    P.x += uAmp * 0.3 * sin(t * 5.9 + uTime * uSpeed * 0.65 + ph * 3.3);
+
+    // the ribbon twists about its own axis like silk in slow water
     float taper = pow(sin(3.14159 * t), 0.65);
-    float th = uThickness * taper * (0.75 + 0.25 * sin(t * 11.0 + uTime * 0.9 + uPhase));
+    float th = uThickness * taper
+             * (0.7 + 0.3 * sin(t * 9.0 + uTime * 0.8 + ph))
+             * mix(1.0, 0.55, aLayer);
+    float roll = t * 6.28318 * uTwist - uTime * 0.5 + ph;
+    vec3 nrm = normalize(vec3(0.45 * sin(roll), cos(roll), 0.35 * sin(roll * 0.77)));
+    P += nrm * across * th;
 
-    vec3 p;
-    p.x = uArcOrigin.x + sin(ang) * uDist;
-    p.z = uArcOrigin.z - cos(ang) * uDist
-        + uAmp * 0.35 * sin(t * 9.7 + uTime * uSpeed * 0.8 + uPhase * 3.0);
-    p.y = uHeight + lift + across * th;
-    if (uMirror > 0.5) p.y = -p.y;
+    if (uMirror > 0.5) P.y = -P.y;
 
     vT = t;
     vAcross = across;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+    vDim = mix(1.0, 0.5, aLayer);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(P, 1.0);
   }
 `;
 
@@ -67,30 +82,51 @@ const strandFragment = /* glsl */ `
   uniform vec2 uPulses[${MAX_PULSES}]; // x = travelled distance 0..0.55, y = strength
   varying float vT;
   varying float vAcross;
+  varying float vDim;
   void main() {
-    // soft body with a luminous core line; salience sharpens the core
     float body = pow(max(0.0, 1.0 - abs(vAcross)), 1.6) * 0.5;
     float core = exp(-vAcross * vAcross * mix(6.0, 14.0, uDefinition))
                * mix(0.45, 0.95, uDefinition);
     float ends = smoothstep(0.0, 0.06, vT) * smoothstep(1.0, 0.94, vT);
 
-    // slow shimmer drifting along the strand — light is alive, never static
+    // shimmer that drifts along the strand — light alive, never static
     float shimmer = 0.7
-      + 0.3 * sin(vT * 19.0 - uTime * 1.1 + uPhase * 5.0)
-            * sin(vT * 7.0 + uTime * 0.7 + uPhase);
+      + 0.3 * sin(vT * 19.0 - uTime * 1.4 + uPhase * 5.0)
+            * sin(vT * 7.0 + uTime * 0.8 + uPhase);
 
-    // onset pulses travelling outward from the strand's centre
     float d = abs(vT - 0.5);
     float pulse = 0.0;
     for (int i = 0; i < ${MAX_PULSES}; i++) {
-      float pd = uPulses[i].x;
-      float ps = uPulses[i].y;
-      pulse += ps * exp(-pow((d - pd) * 16.0, 2.0));
+      pulse += uPulses[i].y * exp(-pow((d - uPulses[i].x) * 16.0, 2.0));
     }
 
-    float a = (body + core) * ends * shimmer * uIntensity * (1.0 + pulse * 1.6);
+    float a = (body + core) * ends * shimmer * uIntensity * vDim * (1.0 + pulse * 1.6);
     if (a <= 0.004) discard;
     gl_FragColor = vec4(uColor * (1.0 + pulse * 0.5), a);
+  }
+`;
+
+const glowVertex = /* glsl */ `
+  uniform vec3 uCenter;
+  uniform float uScale;
+  varying vec2 vUv;
+  void main() {
+    vec4 mv = modelViewMatrix * vec4(uCenter, 1.0);
+    mv.xy += position.xy * uScale;
+    vUv = uv;
+    gl_Position = projectionMatrix * mv;
+  }
+`;
+
+const glowFragment = /* glsl */ `
+  uniform vec3 uColor;
+  uniform float uIntensity;
+  varying vec2 vUv;
+  void main() {
+    float d = length(vUv - 0.5) * 2.0;
+    float a = exp(-d * d * 3.2) * uIntensity;
+    if (a <= 0.003) discard;
+    gl_FragColor = vec4(uColor, a);
   }
 `;
 
@@ -136,6 +172,31 @@ function additive(m: THREE.ShaderMaterial): THREE.ShaderMaterial {
   return m;
 }
 
+/** Two stacked strips sharing one draw call, distinguished by aLayer. */
+function buildStrandGeometry(): THREE.BufferGeometry {
+  const pos: number[] = [];
+  const layer: number[] = [];
+  const idx: number[] = [];
+  for (let l = 0; l < LAYERS; l++) {
+    const base = l * (SEGMENTS + 1) * 2;
+    for (let i = 0; i <= SEGMENTS; i++) {
+      const x = i / SEGMENTS - 0.5;
+      pos.push(x, -0.5, 0, x, 0.5, 0);
+      layer.push(l, l);
+      if (i < SEGMENTS) {
+        const a = base + i * 2;
+        idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('aLayer', new THREE.Float32BufferAttribute(layer, 1));
+  g.setIndex(idx);
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e5);
+  return g;
+}
+
 interface Pulse {
   dist: number;
   strength: number;
@@ -148,6 +209,7 @@ export class Strand {
 
   private mat: THREE.ShaderMaterial;
   private mirrorMat: THREE.ShaderMaterial;
+  private glowMat: THREE.ShaderMaterial;
   private sparkMat: THREE.ShaderMaterial;
   private mirror: THREE.Mesh;
   private pulses: Pulse[] = [];
@@ -158,12 +220,11 @@ export class Strand {
     rng: () => number,
     private thicknessScale = 1,
   ) {
-    const geo = new THREE.PlaneGeometry(1, 1, SEGMENTS, 1);
-    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e5);
+    const geo = buildStrandGeometry();
     this.pulseArray = new Float32Array(MAX_PULSES * 2);
 
-    const makeMat = (mirrorFlag: number) => {
-      const m = additive(
+    const makeMat = (mirrorFlag: number) =>
+      additive(
         new THREE.ShaderMaterial({
           vertexShader: strandVertex,
           fragmentShader: strandFragment,
@@ -178,6 +239,7 @@ export class Strand {
             uAmp: { value: 0.8 },
             uSpeed: { value: 0.6 },
             uPhase: { value: rng() * 12.56 },
+            uTwist: { value: 0.7 },
             uMirror: { value: mirrorFlag },
             uColor: { value: new THREE.Color() },
             uIntensity: { value: 0.05 },
@@ -187,8 +249,6 @@ export class Strand {
           side: THREE.DoubleSide,
         }),
       );
-      return m;
-    };
 
     this.mat = makeMat(0);
     this.mirrorMat = makeMat(1);
@@ -196,6 +256,23 @@ export class Strand {
     this.mirror = new THREE.Mesh(geo, this.mirrorMat);
     mesh.frustumCulled = false;
     this.mirror.frustumCulled = false;
+
+    // soft glow anchoring the strand in depth
+    const glowGeo = new THREE.PlaneGeometry(1, 1);
+    this.glowMat = additive(
+      new THREE.ShaderMaterial({
+        vertexShader: glowVertex,
+        fragmentShader: glowFragment,
+        uniforms: {
+          uCenter: { value: new THREE.Vector3() },
+          uScale: { value: 3 },
+          uColor: { value: new THREE.Color() },
+          uIntensity: { value: 0.04 },
+        },
+      }),
+    );
+    const glow = new THREE.Mesh(glowGeo, this.glowMat);
+    glow.frustumCulled = false;
 
     // sparks
     const sparkGeo = new THREE.BufferGeometry();
@@ -229,8 +306,8 @@ export class Strand {
     const sparks = new THREE.Points(sparkGeo, this.sparkMat);
     sparks.frustumCulled = false;
 
-    this.group.add(mesh, this.mirror, sparks);
-    this.geometries.push(geo, sparkGeo);
+    this.group.add(mesh, this.mirror, glow, sparks);
+    this.geometries.push(geo, glowGeo, sparkGeo);
   }
 
   /** Fire an onset pulse that travels outward from the strand's centre. */
@@ -260,7 +337,6 @@ export class Strand {
       arcOrigin.z - Math.cos(centerAngle) * dist,
     );
 
-    // advance pulses
     for (const p of this.pulses) {
       p.dist += dt * 0.55;
       p.strength *= Math.exp(-dt * 2.4);
@@ -281,16 +357,22 @@ export class Strand {
       u.uDist.value = dist;
       u.uHeight.value = height;
       // quiet strands hang slack and thin; loud ones billow tall and full
-      u.uAmp.value = 0.45 + energy * 1.5;
-      u.uSpeed.value = 0.35 + energy * 0.5 + flux * 0.5;
+      u.uAmp.value = 0.5 + energy * 1.8;
+      u.uSpeed.value = 0.4 + energy * 0.55 + flux * 0.5;
       u.uThickness.value = (0.22 + energy * 0.6) * (1 + salientLevel * 0.35) * this.thicknessScale;
+      u.uTwist.value = 0.45 + flux * 0.75;
       (u.uColor.value as THREE.Color).copy(color);
       u.uDefinition.value = salientLevel;
     }
     this.mat.uniforms.uIntensity.value = intensity;
     this.mirrorMat.uniforms.uIntensity.value = intensity * 0.26;
 
-    // sparks: the salient voice sheds fine rising light
+    const gu = this.glowMat.uniforms;
+    (gu.uCenter.value as THREE.Vector3).copy(this.center);
+    (gu.uColor.value as THREE.Color).copy(color);
+    gu.uScale.value = 2.5 + energy * 5.0;
+    gu.uIntensity.value = 0.03 + intensity * 0.22;
+
     const su = this.sparkMat.uniforms;
     su.uTime.value = time;
     (su.uCenter.value as THREE.Vector3).copy(this.center);
@@ -308,6 +390,7 @@ export class Strand {
     for (const g of this.geometries) g.dispose();
     this.mat.dispose();
     this.mirrorMat.dispose();
+    this.glowMat.dispose();
     this.sparkMat.dispose();
   }
 }
