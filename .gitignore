@@ -4,5 +4,11 @@ dist
 *.mp3
 *.flac
 *.wav
+*.mp4
+*.webm
+*.gif
+# repo showcase media is allowed
+!media/voyage.gif
+!media/voyage-1080p60.mp4
 # bundled baseline recordings (CC BY-SA — John Harrison / WSU Chamber Players)
 !public/audio/*.mp3

@@ -1,8 +1,16 @@
 # Inside the Orchestra
 
+**Live: https://blackjacket1403.github.io/octave/**
+
+![The Voyage — flying through a star corridor while Vivaldi's Spring plays](media/voyage.gif)
+
+*The Voyage, flying through Vivaldi's "Spring": the five voices of the orchestra are silk
+ribbons of light weaving past star systems whose stars pulse — and whose planets revolve —
+to the music. ([15s clip in 1080p60 with sound](media/voyage-1080p60.mp4))*
+
 An immersive visualization of classical music. Drop in any recording (MP3 / FLAC / WAV / OGG)
-— or play the bundled demo piece — and stand at the conductor's podium of a dark concert hall
-where every voice in the music is a body of living light.
+— stream a public-domain recording straight from the Internet Archive — or play the bundled
+demo piece, and watch the music become a living world.
 
 This is not an equalizer. There are no bars, waveforms, or spectrum rings. The five musical
 registers (bass, tenor, alto, soprano, brilliance) become five aurora strands — continuous
