@@ -108,6 +108,58 @@ const hazeFragment = /* glsl */ `
   }
 `;
 
+// ---------- stage arc: a faint line of light grounding the strands ----------
+const arcVertex = /* glsl */ `
+  varying vec2 vSW; // x = 0..1 along arc, y = -1..1 across
+  void main() {
+    vSW = vec2(uv.x, uv.y * 2.0 - 1.0);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const arcFragment = /* glsl */ `
+  uniform vec3 uColor;
+  uniform float uIntensity;
+  varying vec2 vSW;
+  void main() {
+    float across = exp(-vSW.y * vSW.y * 3.0);
+    float ends = smoothstep(0.0, 0.12, vSW.x) * smoothstep(1.0, 0.88, vSW.x);
+    float a = across * ends * uIntensity;
+    if (a <= 0.002) discard;
+    gl_FragColor = vec4(uColor, a);
+  }
+`;
+
+/** Strip geometry tracing the orchestra arc on the floor. */
+function buildArcGeometry(): THREE.BufferGeometry {
+  const STEPS = 64;
+  const RADIUS = 19.5;
+  const HALF = 0.78; // radians, a little wider than the strand arc
+  const WIDTH = 2.6;
+  const ORIGIN_Z = 11;
+  const pos: number[] = [];
+  const uv: number[] = [];
+  const idx: number[] = [];
+  for (let i = 0; i <= STEPS; i++) {
+    const t = i / STEPS;
+    const ang = -HALF + t * HALF * 2;
+    for (const w of [-0.5, 0.5]) {
+      const r = RADIUS + w * WIDTH;
+      pos.push(Math.sin(ang) * r, 0.02, ORIGIN_Z - Math.cos(ang) * r);
+      uv.push(t, w + 0.5);
+    }
+    if (i < STEPS) {
+      const a = i * 2;
+      idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  return g;
+}
+
 // ---------- motes ----------
 const moteVertex = /* glsl */ `
   uniform float uTime;
@@ -154,6 +206,7 @@ export class Atmosphere {
   private floorMat: THREE.ShaderMaterial;
   private hazeMat: THREE.ShaderMaterial;
   private moteMat: THREE.ShaderMaterial;
+  private arcMat: THREE.ShaderMaterial;
   private moteGeo: THREE.BufferGeometry;
   private hazeGeo: THREE.InstancedBufferGeometry;
   private disposables: (THREE.BufferGeometry | THREE.Material)[] = [];
@@ -197,6 +250,22 @@ export class Atmosphere {
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.01;
     floor.renderOrder = -9;
+
+    // stage arc
+    const arcGeo = buildArcGeometry();
+    this.arcMat = new THREE.ShaderMaterial({
+      vertexShader: arcVertex,
+      fragmentShader: arcFragment,
+      uniforms: {
+        uColor: { value: new THREE.Color('#c8a96a') },
+        uIntensity: { value: 0.05 },
+      },
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+    });
+    const arc = new THREE.Mesh(arcGeo, this.arcMat);
+    arc.frustumCulled = false;
 
     // haze
     const plane = new THREE.PlaneGeometry(1, 1);
@@ -263,9 +332,9 @@ export class Atmosphere {
     const motes = new THREE.Points(this.moteGeo, this.moteMat);
     motes.frustumCulled = false;
 
-    this.group.add(sky, floor, haze, motes);
-    this.disposables.push(skyGeo, floorGeo, plane, this.hazeGeo, this.moteGeo);
-    this.disposables.push(this.skyMat, this.floorMat, this.hazeMat, this.moteMat);
+    this.group.add(sky, floor, arc, haze, motes);
+    this.disposables.push(skyGeo, floorGeo, arcGeo, plane, this.hazeGeo, this.moteGeo);
+    this.disposables.push(this.skyMat, this.floorMat, this.hazeMat, this.moteMat, this.arcMat);
   }
 
   /**
@@ -298,6 +367,9 @@ export class Atmosphere {
 
     this.floorMat.uniforms.uAfterglow.value = afterglow;
     this.floorMat.uniforms.uWarmth.value = warmth;
+
+    // the stage line breathes with the music but never disappears
+    this.arcMat.uniforms.uIntensity.value = 0.035 + lift * 0.08 + warmth * 0.05;
   }
 
   setQuality(level: number): void {

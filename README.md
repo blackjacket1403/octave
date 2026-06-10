@@ -5,19 +5,24 @@ An immersive visualization of classical music. Drop in any recording (MP3 / FLAC
 where every voice in the music is a body of living light.
 
 This is not an equalizer. There are no bars, waveforms, or spectrum rings. The five musical
-registers (bass, tenor, alto, soprano, brilliance) become five breathing swarms of light,
-arranged like orchestra seating:
+registers (bass, tenor, alto, soprano, brilliance) become five aurora strands — continuous
+ribbons of light undulating like slow bow strokes — arranged like orchestra seating:
 
 - **Where a sound comes from** — stereo pan places its body left or right on the arc.
 - **How high it sings** — register sets altitude; bass glows near the floor, brilliance overhead.
 - **How loud it is** — loudness brings a body toward you; a crescendo is light approaching.
 - **What to listen to** — a salience tracker finds the melodic foreground; that body
   intensifies, tightens, trails light, and the camera leans gently toward it.
-- **Attacks** — onsets ripple outward as pulses of light.
+- **Attacks** — onsets travel outward along the strand as pulses of light.
 - **Texture and memory** — busy passages fill the hall with haze and motes; climaxes warm
   the ambient tone and leave a slow-fading afterglow on the floor.
 
 Everything is decoded and analyzed locally with the Web Audio API. Nothing is uploaded.
+
+Baseline recordings bundled in `public/audio/`: Vivaldi, *The Four Seasons* — Spring I and
+Winter I, performed by John Harrison with the Wichita State University Chamber Players,
+licensed CC BY-SA (via classicals.de). The third baseline is a synthesized 45-second study
+rendered with oscillators at runtime.
 
 ## Running
 

@@ -137,15 +137,31 @@
         font-size: 10px;
         color: var(--ivory-faint);
       }
-      #demoBtn {
-        margin-top: 30px;
-        padding: 10px 6px;
-        color: var(--ivory-dim);
-        border-bottom: 1px solid transparent;
+      .baselines {
+        margin-top: 34px;
+        display: flex;
+        align-items: baseline;
+        gap: 22px;
+        flex-wrap: wrap;
+        justify-content: center;
         animation: fadeUp 1.8s 0.95s ease both;
+      }
+      .baselines .lead {
+        font-size: 10px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--ivory-faint);
+      }
+      .baselines button {
+        font-family: var(--serif);
+        font-style: italic;
+        font-size: 17px;
+        color: var(--ivory-dim);
+        padding: 4px 2px;
+        border-bottom: 1px solid transparent;
         transition: color 0.35s ease, border-color 0.35s ease;
       }
-      #demoBtn:hover { color: var(--gold); border-color: rgba(216, 180, 106, 0.4); }
+      .baselines button:hover { color: var(--gold); border-color: rgba(216, 180, 106, 0.4); }
       #landing .privacy {
         position: absolute;
         bottom: 26px;
@@ -342,8 +358,13 @@
         <div class="dz-main">Drop a recording here</div>
         <div class="dz-sub smallcaps">mp3 · flac · wav · ogg — or click to browse</div>
       </div>
-      <button id="demoBtn" class="smallcaps">Or play the demo piece</button>
-      <div class="privacy">Decoded locally — nothing leaves this page</div>
+      <div class="baselines">
+        <span class="lead">or begin with</span>
+        <button data-url="audio/vivaldi-spring-1.mp3" data-name="Vivaldi — Spring I · Allegro">Vivaldi · Spring</button>
+        <button data-url="audio/vivaldi-winter-1.mp3" data-name="Vivaldi — Winter I · Allegro non molto">Vivaldi · Winter</button>
+        <button id="demoBtn" data-name="Study in D minor — demo piece">Synthesized study</button>
+      </div>
+      <div class="privacy">Decoded locally — nothing leaves this page · Vivaldi: John Harrison &amp; WSU Chamber Players, CC BY-SA</div>
     </div>
 
     <div id="dragveil">release to listen</div>

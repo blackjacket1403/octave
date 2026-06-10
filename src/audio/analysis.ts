@@ -138,7 +138,7 @@ export class AnalysisProducer {
       this.binLo.push(Math.max(1, Math.round(BAND_EDGES[b] / binHz)));
       this.binHi.push(Math.min(this.nyquistBins - 1, Math.round(BAND_EDGES[b + 1] / binHz)));
       this.bandMax.push(new AdaptiveMax(NOISE_FLOOR_DB + 22, 1500, 25000));
-      this.bandEnv.push(new EnvelopeFollower(50, 600));
+      this.bandEnv.push(new EnvelopeFollower(50, 800));
       this.bandEnvFast.push(new EnvelopeFollower(18, 120));
       this.bandLongEnv.push(new EnvelopeFollower(900, 900));
       this.bandPan.push(new EnvelopeFollower(180, 320));
@@ -222,7 +222,7 @@ export class AnalysisProducer {
       // pan from L/R energy ratio; hold last pan when the band is silent
       if (db > NOISE_FLOOR_DB) {
         const panRaw = (pR - pL) / (pR + pL + 1e-12);
-        band.pan = this.bandPan[b].process(clamp(panRaw * 1.4, -1, 1), dtMs);
+        band.pan = this.bandPan[b].process(clamp(panRaw * 1.1, -1, 1), dtMs);
       }
 
       // dominant in-band frequency, normalized within the band (log-ish feel

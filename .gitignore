@@ -4,3 +4,5 @@ dist
 *.mp3
 *.flac
 *.wav
+# bundled baseline recordings (CC BY-SA — John Harrison / WSU Chamber Players)
+!public/audio/*.mp3

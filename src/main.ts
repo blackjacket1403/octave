@@ -66,6 +66,7 @@ function switchMode(id: string): void {
 const ui = new UI({
   onFile: (file) => void loadFile(file),
   onDemo: () => void loadDemo(),
+  onTrackUrl: (url, name) => void loadUrl(url, name),
   onTogglePlay: () => void engine?.toggle(),
   onSeek: (f) => engine?.seek(f * (engine?.duration ?? 0)),
   onVolume: (v) => engine?.setVolume(v),
@@ -81,6 +82,22 @@ async function loadFile(file: File): Promise<void> {
     await eng.play();
   } catch {
     ui.showToast('Could not decode that file — try an MP3, FLAC, WAV or OGG.');
+  }
+}
+
+async function loadUrl(url: string, name: string): Promise<void> {
+  const eng = ensureEngine();
+  try {
+    ui.showToast('Loading…', 1500);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(String(res.status));
+    const data = await res.arrayBuffer();
+    const buffer = await eng.ctx.decodeAudioData(data);
+    eng.load(buffer);
+    ui.trackLoaded(name);
+    await eng.play();
+  } catch {
+    ui.showToast('Could not load that recording.');
   }
 }
 

@@ -8,6 +8,7 @@ import { modeRegistry } from '../modes/registry';
 export interface UICallbacks {
   onFile(file: File): void;
   onDemo(): void;
+  onTrackUrl(url: string, name: string): void;
   onTogglePlay(): void;
   onSeek(fraction: number): void;
   onVolume(v: number): void;
@@ -74,6 +75,11 @@ export class UI {
       this.fileInput.value = '';
     });
     this.demoBtn.addEventListener('click', () => this.cb.onDemo());
+    document.querySelectorAll<HTMLButtonElement>('.baselines button[data-url]').forEach((btn) =>
+      btn.addEventListener('click', () =>
+        this.cb.onTrackUrl(btn.dataset.url!, btn.dataset.name ?? btn.textContent ?? ''),
+      ),
+    );
 
     // drag & drop anywhere, any time
     let dragDepth = 0;

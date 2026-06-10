@@ -2,27 +2,30 @@ import * as THREE from 'three';
 import type { Mode } from '../Mode';
 import type { AnalysisFrame } from '../../audio/analysis';
 import { BAND_COUNT } from '../../audio/analysis';
-import { clamp01, lerp, smoothK } from '../../audio/smoothing';
-import { LightBody } from './LightBody';
-import { Ripples } from './Ripples';
+import { EnvelopeFollower, clamp01, lerp, smoothK } from '../../audio/smoothing';
+import { Strand } from './Strand';
 import { Atmosphere } from './Atmosphere';
 import { CameraRig } from './CameraRig';
 import { BAND_COLORS, BAND_HEIGHT, BAND_HOME_PAN, DIM_COLOR } from './palette';
 
 /**
  * Mode 1 — The Luminous Hall.
- * Five register bands are five bodies of light arranged like orchestra
- * seating around the podium. Loudness approaches, attention tightens and
- * trails, climaxes warm the hall and leave afterglow on the floor.
+ * Five register bands are five aurora strands of light hanging on a shallow
+ * arc around the podium, like bow strokes suspended in the air. Loudness
+ * approaches and billows, attention sharpens and sheds sparks, onsets travel
+ * along the strands as pulses, climaxes warm the hall and leave afterglow.
  */
 
-/** Arc geometry: bodies sit on a shallow arc in front of the viewer. */
-const ARC_HALF_ANGLE = THREE.MathUtils.degToRad(34);
+const ARC_HALF_ANGLE = THREE.MathUtils.degToRad(30);
 const ARC_ORIGIN = new THREE.Vector3(0, 0, 11); // behind the camera; arc bows away
-const DIST_FAR = 24; // silent bodies recede here
-const DIST_NEAR = 14.5; // fortissimo arrives here
+const DIST_FAR = 23; // silent strands recede into the haze
+const DIST_NEAR = 15; // fortissimo arrives here
 
-// deterministic rng so reloads look identical (and dispose/recreate matches)
+/** Per-band strand character: low voices broad and heavy, high voices fine. */
+const STRAND_HALF_ANGLE = [0.34, 0.29, 0.245, 0.205, 0.17];
+const STRAND_THICKNESS = [1.5, 1.2, 0.95, 0.7, 0.5];
+
+// deterministic rng so reloads look identical
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
@@ -38,18 +41,21 @@ export class LuminousHall implements Mode {
   private scene!: THREE.Scene;
   private renderer!: THREE.WebGLRenderer;
   private group = new THREE.Group();
-  private bodies: LightBody[] = [];
-  private ripples = new Ripples();
+  private strands: Strand[] = [];
   private atmosphere!: Atmosphere;
   private rig = new CameraRig();
 
   private time = 0;
   private warmth = 0; // slow thermal memory of the piece
   private afterglow = 0; // floor memory of the last climax
-  private positions: THREE.Vector3[] = [];
+
+  // per-band smoothed display state, so every transition is a crossfade
+  private dispAngle: number[] = [];
+  private dispDist: number[] = [];
+  private dispHeight: number[] = [];
+  private salienceEnv: EnvelopeFollower[] = [];
   private colors: THREE.Color[] = [];
   private scratchColor = new THREE.Color();
-  private scratchVec = new THREE.Vector3();
 
   init(scene: THREE.Scene, renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
     this.scene = scene;
@@ -59,35 +65,19 @@ export class LuminousHall implements Mode {
     this.group.add(this.atmosphere.group);
 
     for (let b = 0; b < BAND_COUNT; b++) {
-      const body = new LightBody(rng);
-      this.bodies.push(body);
-      this.group.add(body.group);
-      this.positions.push(this.bandPosition(b, BAND_HOME_PAN[b], 0, 0.5, new THREE.Vector3()));
+      const strand = new Strand(rng, STRAND_THICKNESS[b]);
+      this.strands.push(strand);
+      this.group.add(strand.group);
+      this.dispAngle.push(BAND_HOME_PAN[b] * ARC_HALF_ANGLE);
+      this.dispDist.push(DIST_FAR);
+      this.dispHeight.push(BAND_HEIGHT[b]);
+      // attention arrives in ~0.6s and lets go over ~1.6s — a slow crossfade
+      this.salienceEnv.push(new EnvelopeFollower(600, 1600));
       this.colors.push(BAND_COLORS[b].clone());
     }
 
-    this.group.add(this.ripples.group);
     scene.add(this.group);
     this.rig.init(camera);
-  }
-
-  /** Where a band with the given pan/energy/pitch sits in the hall. */
-  private bandPosition(
-    band: number,
-    pan: number,
-    energy: number,
-    pitch: number,
-    out: THREE.Vector3,
-  ): THREE.Vector3 {
-    const angle = pan * ARC_HALF_ANGLE;
-    // loudness approaches the podium; silence recedes into the haze
-    const dist = lerp(DIST_FAR, DIST_NEAR, clamp01(energy * 1.15));
-    out.set(
-      ARC_ORIGIN.x + Math.sin(angle) * dist,
-      BAND_HEIGHT[band] + (pitch - 0.5) * 2.2,
-      ARC_ORIGIN.z - Math.cos(angle) * dist,
-    );
-    return out;
   }
 
   update(frame: AnalysisFrame, dt: number): void {
@@ -95,12 +85,10 @@ export class LuminousHall implements Mode {
     const dtMs = dt * 1000;
 
     // ---- hall memory -------------------------------------------------------
-    // sustained energy warms the ambient tone over ~14s; quiet cools over ~30s
     const warmthTarget = clamp01((frame.energySlow - 0.18) * 1.4);
     const kWarm = smoothK(warmthTarget > this.warmth ? 14000 : 30000, dtMs);
     this.warmth += (warmthTarget - this.warmth) * kWarm;
 
-    // climaxes leave afterglow that fades over ~20s
     const climax = clamp01((frame.energySlow - 0.72) / 0.28);
     this.afterglow = Math.max(climax, this.afterglow * Math.exp(-dt / 20));
 
@@ -109,58 +97,69 @@ export class LuminousHall implements Mode {
     this.atmosphere.update(this.time, this.warmth, density, this.afterglow, frame.energyFast, px);
 
     // ---- the five voices ---------------------------------------------------
+    let leanTarget: THREE.Vector3 | null = null;
+    let leanWeight = 0;
+
     for (let b = 0; b < BAND_COUNT; b++) {
       const band = frame.bands[b];
-      const isSalient = frame.salientBand === b;
-      const salientLevel = isSalient ? frame.salience : 0;
+      const salient = this.salienceEnv[b].process(
+        frame.salientBand === b ? frame.salience : 0,
+        dtMs,
+      );
 
-      // measured pan earns trust as the band gets louder; quiet bands sit in
-      // their default orchestra seating so the dormant hall still has shape
+      // measured pan earns trust as the band gets louder; quiet strands rest
+      // in their orchestra seating so the dormant hall still has shape
       const panTrust = clamp01(band.energy * 3) * 0.9;
       const pan = lerp(BAND_HOME_PAN[b], band.pan, panTrust);
 
-      this.bandPosition(b, pan, band.energy, band.pitch, this.scratchVec);
-      // position params are already envelope-smoothed; this final lerp adds
-      // a touch of mass so bodies glide rather than steer
-      this.positions[b].lerp(this.scratchVec, smoothK(280, dtMs));
+      // targets, then glide: nothing in the hall ever jumps
+      const angleT = pan * ARC_HALF_ANGLE;
+      const distT = lerp(DIST_FAR, DIST_NEAR, clamp01(band.energy * 1.1));
+      const heightT = BAND_HEIGHT[b] + (band.pitch - 0.5) * 1.8;
+      this.dispAngle[b] += (angleT - this.dispAngle[b]) * smoothK(900, dtMs);
+      this.dispDist[b] += (distT - this.dispDist[b]) * smoothK(1100, dtMs);
+      this.dispHeight[b] += (heightT - this.dispHeight[b]) * smoothK(1400, dtMs);
 
-      // non-salient voices desaturate slightly; the melody holds full color
-      const dim = (1 - salientLevel * 0.9) * frame.salience * 0.45;
-      this.scratchColor.copy(BAND_COLORS[b]).lerp(DIM_COLOR, isSalient ? 0 : dim);
+      // non-salient voices desaturate slightly toward the hall's ambience
+      this.scratchColor
+        .copy(BAND_COLORS[b])
+        .lerp(DIM_COLOR, (1 - salient) * frame.salience * 0.4);
       this.colors[b].copy(this.scratchColor);
 
-      // sound blooms: brightness from energy, a boost for the salient voice,
-      // a brief glint on attacks — and a faint ember even in silence
+      // sound blooms; a faint ember remains even in silence
       const intensity = Math.min(
-        0.95,
-        0.05 +
-          Math.pow(band.energy, 1.3) * 0.7 * (1 + salientLevel * 0.5) +
-          band.attackStrength * 0.18,
+        0.9,
+        0.05 + Math.pow(band.energy, 1.25) * 0.6 * (1 + salient * 0.6) + band.attackStrength * 0.12,
       );
 
-      // salient swarm tightens; loud swarms swell
-      const spread = (1.8 + band.energy * 1.3) * (1 - salientLevel * 0.34);
-
-      this.bodies[b].update(
+      this.strands[b].update(
         this.time,
-        this.positions[b],
+        dt,
+        ARC_ORIGIN,
+        this.dispAngle[b],
+        STRAND_HALF_ANGLE[b],
+        this.dispDist[b],
+        this.dispHeight[b],
         this.colors[b],
         band.energy,
         intensity,
-        spread,
-        salientLevel,
+        salient,
+        frame.flux,
         px,
       );
 
-      if (band.attack && band.attackStrength > 0.12) {
-        this.ripples.spawn(this.positions[b], this.colors[b], band.attackStrength);
+      if (band.attack && band.attackStrength > 0.15) {
+        this.strands[b].pulse(band.attackStrength);
+      }
+
+      if (salient > leanWeight) {
+        leanWeight = salient;
+        leanTarget = this.strands[b].center;
       }
     }
 
-    this.ripples.update(dt);
-
     // ---- camera ------------------------------------------------------------
-    this.rig.setLeanTarget(this.positions[frame.salientBand], frame.salience);
+    this.rig.setLeanTarget(leanTarget, leanWeight);
     this.rig.update(dt, frame.energySlow);
   }
 
@@ -170,7 +169,7 @@ export class LuminousHall implements Mode {
 
   setQuality(level: number): void {
     this.atmosphere.setQuality(level);
-    for (const body of this.bodies) body.setMirrorVisible(level >= 1);
+    for (const s of this.strands) s.setMirrorVisible(level >= 1);
   }
 
   setLook(x: number, y: number): void {
@@ -179,9 +178,8 @@ export class LuminousHall implements Mode {
 
   dispose(): void {
     this.scene.remove(this.group);
-    for (const body of this.bodies) body.dispose();
-    this.ripples.dispose();
+    for (const s of this.strands) s.dispose();
     this.atmosphere.dispose();
-    this.bodies = [];
+    this.strands = [];
   }
 }
