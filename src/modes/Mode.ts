@@ -19,6 +19,10 @@ export interface Mode {
   setQuality?(level: number): void;
   /** Pointer-driven look, in normalized -1..1 offsets. Optional. */
   setLook?(x: number, y: number): void;
+  /** Hover/touch position in NDC (-1..1); modes may react to presence. */
+  setPointer?(x: number, y: number): void;
+  /** A click/tap that wasn't a drag, in NDC. Modes may detonate things. */
+  tap?(x: number, y: number): void;
 }
 
 export interface ModeDefinition {

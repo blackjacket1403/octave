@@ -37,18 +37,41 @@ const streamVertex = /* glsl */ `
   attribute vec3 aPos;
   attribute float aMag;
   attribute float aPhase;
+  attribute vec3 aTint;
   varying float vA;
+  varying float vMag;
+  varying vec3 vTint;
   void main() {
     vec3 p = aPos;
     // the world streams past: wrap stars within the corridor depth
     p.z = mod(aPos.z + uTravel, ${CORRIDOR.depth.toFixed(1)}) - ${(CORRIDOR.depth - 8).toFixed(1)};
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
-    gl_PointSize = mix(0.8, 2.6, aMag) * uPx * (300.0 / max(1.0, -mv.z));
-    float tw = 0.7 + 0.3 * sin(uTime * mix(0.2, 0.6, aMag) + aPhase * 50.0);
+    gl_PointSize = mix(1.4, 5.6, aMag) * uPx * (340.0 / max(1.0, -mv.z));
+    float tw = 0.75 + 0.25 * sin(uTime * mix(0.2, 0.6, aMag) + aPhase * 50.0);
     // fade in at the far end so stars never pop into view
     float far = smoothstep(-${(CORRIDOR.depth - 12).toFixed(1)}, -${(CORRIDOR.depth - 42).toFixed(1)}, p.z);
-    vA = mix(0.15, 0.8, aMag) * tw * far;
+    vA = mix(0.35, 1.0, aMag) * tw * far;
+    vMag = aMag;
+    vTint = aTint;
     gl_Position = projectionMatrix * mv;
+  }
+`;
+
+const streamFragment = /* glsl */ `
+  varying float vA;
+  varying float vMag;
+  varying vec3 vTint;
+  void main() {
+    vec2 uv = gl_PointCoord - 0.5;
+    float d = length(uv) * 2.0;
+    float ang = atan(uv.y, uv.x);
+    float core = exp(-d * d * 6.0);
+    // the brightest stars carry four-ray diffraction spikes
+    float spike = pow(abs(cos(ang * 2.0)), 26.0) * exp(-d * 2.2)
+                * smoothstep(0.72, 0.94, vMag) * 0.9;
+    float a = (core + spike - 0.02) * vA;
+    if (a <= 0.003) discard;
+    gl_FragColor = vec4(vTint, a);
   }
 `;
 
@@ -245,6 +268,11 @@ export class Voyage implements Mode {
   private travel = 0;
   private speed = 7;
   private warm = 0;
+  private pointer = new THREE.Vector3(0, 0, -22);
+  private pointerWeight = 0;
+  private pointerSeen = -10;
+  private novas: { pos: THREE.Vector3; age: number }[] = [];
+  private novaFlash = 0;
   private yaw = 0;
   private pitch = 0;
   private lookYaw = 0;
@@ -288,27 +316,39 @@ export class Voyage implements Mode {
     const sp = new Float32Array(STREAM_STARS * 3);
     const sm = new Float32Array(STREAM_STARS);
     const sph = new Float32Array(STREAM_STARS);
+    const stint = new Float32Array(STREAM_STARS * 3);
+    const starTints = [
+      { c: new THREE.Color('#ccd6ea'), w: 0.68 }, // cool white
+      { c: new THREE.Color('#eacd9c'), w: 0.84 }, // gold
+      { c: new THREE.Color('#9fb6ee'), w: 0.93 }, // blue giant
+      { c: new THREE.Color('#dcaaa2'), w: 1.01 }, // rose
+    ];
     for (let i = 0; i < STREAM_STARS; i++) {
       sp[i * 3] = (this.rng() - 0.5) * CORRIDOR.x * 2;
       sp[i * 3 + 1] = (this.rng() - 0.5) * CORRIDOR.y * 2;
       sp[i * 3 + 2] = -this.rng() * CORRIDOR.depth;
       sm[i] = Math.pow(this.rng(), 2.0);
       sph[i] = this.rng();
+      const roll = this.rng();
+      const tint = (starTints.find((t) => roll < t.w) ?? starTints[0]).c;
+      stint[i * 3] = tint.r;
+      stint[i * 3 + 1] = tint.g;
+      stint[i * 3 + 2] = tint.b;
     }
     this.streamGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(STREAM_STARS * 3), 3));
     this.streamGeo.setAttribute('aPos', new THREE.BufferAttribute(sp, 3));
     this.streamGeo.setAttribute('aMag', new THREE.BufferAttribute(sm, 1));
     this.streamGeo.setAttribute('aPhase', new THREE.BufferAttribute(sph, 1));
+    this.streamGeo.setAttribute('aTint', new THREE.BufferAttribute(stint, 3));
     this.streamGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e5);
     this.streamMat = additive(
       new THREE.ShaderMaterial({
         vertexShader: streamVertex,
-        fragmentShader: dotFragment,
+        fragmentShader: streamFragment,
         uniforms: {
           uTravel: { value: 0 },
           uTime: { value: 0 },
           uPx: { value: 1 },
-          uColor: { value: new THREE.Color('#cdd5e6') },
         },
       }),
     );
@@ -434,7 +474,8 @@ export class Voyage implements Mode {
       );
       const headMesh = new THREE.Mesh(headGeo, headMat);
       headMesh.frustumCulled = false;
-      const trail = new TrailRibbon(120, 0.03);
+      // emit every frame: a discrete sampling interval reads as stepping
+      const trail = new TrailRibbon(150, 0);
       const r: Ribbon = {
         trail,
         head: new THREE.Vector3(RIBBON_HOME_X[b], RIBBON_HOME_Y[b], -20),
@@ -508,10 +549,22 @@ export class Voyage implements Mode {
     this.travel += this.speed * dt;
     this.warm += (clamp01((frame.energySlow - 0.2) * 1.3) - this.warm) * smoothK(8000, dtMs);
 
+    // pointer presence fades in while you move, lets go when you rest
+    const pTarget = this.time - this.pointerSeen < 2.5 ? 1 : 0;
+    this.pointerWeight += (pTarget - this.pointerWeight) * smoothK(500, dtMs);
+
+    // supernovae: taps detonate, ribbons scatter, light washes the sky
+    this.novaFlash = 0;
+    for (const nv of this.novas) {
+      nv.age += dt;
+      this.novaFlash += Math.exp(-nv.age * 3);
+    }
+    this.novas = this.novas.filter((nv) => nv.age < 1.8);
+
     this.streamMat.uniforms.uTravel.value = this.travel;
     this.streamMat.uniforms.uTime.value = this.time;
     this.streamMat.uniforms.uPx.value = px;
-    this.skyMat.uniforms.uLift.value = frame.energySlow;
+    this.skyMat.uniforms.uLift.value = frame.energySlow + this.novaFlash * 0.7;
     this.skyMat.uniforms.uWarm.value = this.warm;
     this.sparkMat.uniforms.uTime.value = this.time;
     this.sparkMat.uniforms.uTravel.value = this.travel;
@@ -571,17 +624,38 @@ export class Voyage implements Mode {
       let ay = 0;
       for (const sys of this.systems) {
         const dz = sys.pos.z - hz;
-        if (Math.abs(dz) > 14) continue;
         const dx = hx - sys.pos.x;
         const dy = hy - sys.pos.y;
         const d2 = dx * dx + dy * dy;
-        if (d2 > 120) continue;
-        const f = 26 / (d2 + 6);
+        // smooth windows: the deflection eases in and out — a hard cutoff
+        // would kick the ribbon as a star crosses the threshold
+        const zw = clamp01((16 - Math.abs(dz)) / 9);
+        const dw = clamp01((130 - d2) / 70);
+        if (zw <= 0 || dw <= 0) continue;
+        const f = (26 / (d2 + 6)) * zw * zw * dw;
         const inv = 1 / Math.sqrt(d2 + 1e-4);
         // push around, with a touch of swirl so it reads as an orbit-graze
         ax += (dx * inv) * f - (dy * inv) * f * 0.5;
         ay += (dy * inv) * f + (dx * inv) * f * 0.5;
       }
+
+      // the ribbons are curious about you: they lean toward the pointer,
+      // the high voices most eagerly, the bass with dignified reluctance
+      const pw = this.pointerWeight * (0.45 + b * 0.14);
+      ax += (this.pointer.x - hx) * 0.16 * pw;
+      ay += (this.pointer.y - hy) * 0.16 * pw;
+
+      // and they flee a supernova
+      for (const nv of this.novas) {
+        const dx = hx - nv.pos.x;
+        const dy = hy - nv.pos.y;
+        const d2 = dx * dx + dy * dy;
+        const f = (60 / (d2 + 12)) * Math.exp(-nv.age * 2.4);
+        const inv = 1 / Math.sqrt(d2 + 1e-4);
+        ax += dx * inv * f;
+        ay += dy * inv * f;
+      }
+
       r.head.set(hx + ax, hy + ay, hz);
 
       r.color.copy(BAND_COLORS[b]).lerp(DIM_COLOR, (1 - salient) * frame.salience * 0.3);
@@ -651,6 +725,27 @@ export class Voyage implements Mode {
   setLook(x: number, y: number): void {
     this.lookTargetYaw = clamp(x, -1, 1) * THREE.MathUtils.degToRad(40);
     this.lookTargetPitch = clamp(y, -1, 1) * THREE.MathUtils.degToRad(22);
+  }
+
+  /** Project an NDC point onto the ribbon plane ~22 units ahead. */
+  private project(nx: number, ny: number, out: THREE.Vector3): THREE.Vector3 {
+    const halfH = Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2) * 22;
+    return out.set(nx * halfH * this.aspect, ny * halfH, -22);
+  }
+
+  setPointer(x: number, y: number): void {
+    this.project(x, y, this.pointer);
+    this.pointerSeen = this.time;
+  }
+
+  tap(x: number, y: number): void {
+    const pos = this.project(x, y, new THREE.Vector3());
+    this.novas.push({ pos, age: 0 });
+    if (this.novas.length > 4) this.novas.shift();
+    const flash = new THREE.Color('#f6ecd0');
+    this.burst(pos, flash, 1);
+    this.burst(pos, new THREE.Color('#e8c98a'), 0.9);
+    this.burst(pos, new THREE.Color('#aebfe8'), 0.8);
   }
 
   dispose(): void {

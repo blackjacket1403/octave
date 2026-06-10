@@ -7,6 +7,14 @@ import { Voyage } from './voyage/Voyage';
 
 export const modeRegistry: ModeDefinition[] = [
   {
+    id: 'the-voyage',
+    name: 'The Voyage',
+    description:
+      'Fly through deep space with the voices as silk ribbons weaving past stars whose planets orbit to the music.',
+    available: true,
+    create: () => new Voyage(),
+  },
+  {
     id: 'luminous-hall',
     name: 'The Luminous Hall',
     description:
@@ -35,14 +43,6 @@ export const modeRegistry: ModeDefinition[] = [
       'A living spiral galaxy: voices swoop around the burning core, figuration births stars.',
     available: true,
     create: () => new Celestial(),
-  },
-  {
-    id: 'the-voyage',
-    name: 'The Voyage',
-    description:
-      'Fly through deep space with the voices as silk ribbons weaving past stars whose planets orbit to the music.',
-    available: true,
-    create: () => new Voyage(),
   },
 ];
 

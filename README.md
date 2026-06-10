@@ -45,17 +45,23 @@ src/
   demo/       offline-rendered ~45s demo piece (oscillators; no copyrighted audio)
 ```
 
-Four modes share the one analysis engine, selectable from the transport bar:
+Five modes share the one analysis engine, selectable from the transport bar:
 
-1. **The Luminous Hall** — first-person at the podium; each voice is a twisting aurora strand
+1. **The Voyage** (default) — fly forward through deep space; the voices are silk ribbons
+   weaving and slaloming past star systems, each star tuned to a voice and its planets
+   revolving faster the louder that voice plays. Interactive: ribbons lean toward your
+   pointer, and a click/tap detonates a small supernova they scatter from.
+2. **The Luminous Hall** — first-person at the podium; each voice is a twisting aurora strand
    of light on the orchestra arc. Crescendos approach; the melody sharpens and sheds sparks.
-2. **Ink and Current** — voices as pigment currents in water on paper; counterpoint braids,
+3. **Ink and Current** — voices as pigment currents in water on paper; counterpoint braids,
    onsets drop blooming ink, swells flood the sheet.
-3. **The Growing Garden** — phrases grow stems, leaves, and golden blooms on parchment into a
+4. **The Growing Garden** — phrases grow vines, leaves, and golden blooms on parchment into a
    persistent canvas; the finished piece is a grown landscape of the work's structure.
-4. **Celestial Mechanics** — a living spiral galaxy: the disk's rotation, glitter, and core
+5. **Celestial Mechanics** — a living spiral galaxy: the disk's rotation, glitter, and core
    fire follow the music while the voices swoop around the burning centre leaving trails;
    fast figuration births showers of new stars.
-5. **The Voyage** — fly forward through deep space; the voices are silk ribbons weaving and
-   slaloming past star systems, each star tuned to a voice and its planets revolving faster
-   the louder that voice plays.
+
+**Changing music:** the “Music” button in the transport (or “Search the archive…” on the
+landing page) opens a library that searches the Internet Archive's public-domain audio
+collections (no key, fully client-side) and streams any MP3 track it finds — plus the
+bundled Vivaldi baselines and a local-file picker.

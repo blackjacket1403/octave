@@ -311,6 +311,78 @@
       }
       #modeSelect option { background: #14151d; color: var(--ivory); }
 
+      /* ---------- music library ---------- */
+      #library {
+        position: fixed; inset: 0; z-index: 50;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(6, 7, 11, 0.7);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        opacity: 0; visibility: hidden;
+        transition: opacity 0.4s ease, visibility 0.4s;
+        padding: 20px;
+      }
+      #library.open { opacity: 1; visibility: visible; }
+      .lib-panel {
+        width: min(620px, 100%);
+        max-height: min(72vh, 640px);
+        display: flex; flex-direction: column;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        padding: 22px 26px;
+        gap: 14px;
+      }
+      .lib-head { display: flex; justify-content: space-between; align-items: center; }
+      .lib-head .smallcaps { color: var(--ivory-dim); }
+      #libClose { font-size: 22px; line-height: 1; padding: 2px 8px; }
+      #libForm input {
+        width: 100%;
+        background: rgba(232, 226, 212, 0.05);
+        border: 1px solid var(--hairline);
+        padding: 11px 14px;
+        font-family: var(--serif);
+        font-size: 16px;
+        color: var(--ivory);
+        outline: none;
+        transition: border-color 0.3s;
+      }
+      #libForm input:focus { border-color: rgba(216, 180, 106, 0.45); }
+      #libForm input::placeholder { color: rgba(232, 226, 212, 0.3); font-style: italic; }
+      .lib-bundled {
+        display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline;
+      }
+      .lib-bundled .lead { font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ivory-faint); }
+      .lib-bundled button {
+        font-family: var(--serif); font-style: italic; font-size: 15px;
+        color: var(--ivory-dim); padding: 3px 1px;
+      }
+      .lib-bundled button:hover { color: var(--gold); }
+      #libStatus { font-size: 11px; letter-spacing: 0.06em; color: var(--ivory-faint); min-height: 14px; }
+      #libResults { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+      #libResults::-webkit-scrollbar { width: 4px; }
+      #libResults::-webkit-scrollbar-thumb { background: rgba(232,226,212,0.2); }
+      .lib-item {
+        padding: 10px 12px;
+        cursor: pointer;
+        border-bottom: 1px solid rgba(232, 226, 212, 0.06);
+        transition: background 0.25s;
+      }
+      .lib-item:hover { background: rgba(216, 180, 106, 0.05); }
+      .lib-title { font-family: var(--serif); font-size: 16px; color: var(--ivory); }
+      .lib-creator { font-size: 11px; color: var(--ivory-faint); margin-top: 2px; }
+      .lib-tracks { margin-top: 8px; display: flex; flex-direction: column; gap: 1px; font-size: 12px; color: var(--ivory-faint); }
+      .lib-track {
+        display: flex; justify-content: space-between; gap: 12px;
+        text-align: left; padding: 7px 10px;
+        font-size: 13px;
+        color: var(--ivory-dim);
+        background: rgba(232, 226, 212, 0.03);
+      }
+      .lib-track:hover { color: var(--gold); background: rgba(216, 180, 106, 0.07); }
+      .lib-track .lib-len { color: var(--ivory-faint); font-variant-numeric: tabular-nums; }
+      .lib-note { font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(232,226,212,0.22); text-align: center; }
+      #libBtn { letter-spacing: 0.2em; text-transform: uppercase; font-size: 10px; }
+
       /* ---------- dev overlay ---------- */
       #devOverlay {
         position: fixed; top: 18px; left: 18px; z-index: 60;
@@ -398,6 +470,7 @@
         <button data-url="audio/vivaldi-spring-1.mp3" data-name="Vivaldi — Spring I · Allegro">Vivaldi · Spring</button>
         <button data-url="audio/vivaldi-winter-1.mp3" data-name="Vivaldi — Winter I · Allegro non molto">Vivaldi · Winter</button>
         <button id="demoBtn" data-name="Study in D minor — demo piece">Synthesized study</button>
+        <button id="libBtnLanding">Search the archive…</button>
       </div>
       <div class="privacy">Decoded locally — nothing leaves this page · Vivaldi: John Harrison &amp; WSU Chamber Players, CC BY-SA</div>
     </div>
@@ -408,6 +481,7 @@
       <div class="row">
         <div id="trackName"></div>
         <div class="t-controls">
+          <button id="libBtn" aria-label="Change music">Music</button>
           <select id="modeSelect" aria-label="Visualization mode"></select>
         </div>
       </div>
@@ -424,6 +498,27 @@
             <svg viewBox="0 0 16 16"><path d="M2 6 V2 H6 M10 2 H14 V6 M14 10 V14 H10 M6 14 H2 V10"/></svg>
           </button>
         </div>
+      </div>
+    </div>
+
+    <div id="library">
+      <div class="lib-panel">
+        <div class="lib-head">
+          <span class="smallcaps">Change the music</span>
+          <button id="libClose" aria-label="Close">×</button>
+        </div>
+        <form id="libForm">
+          <input id="libInput" type="search" placeholder="Search the Internet Archive — try “Vivaldi Four Seasons”" autocomplete="off" />
+        </form>
+        <div class="lib-bundled">
+          <span class="lead">or</span>
+          <button data-url="audio/vivaldi-spring-1.mp3" data-name="Vivaldi — Spring I · Allegro">Vivaldi · Spring</button>
+          <button data-url="audio/vivaldi-winter-1.mp3" data-name="Vivaldi — Winter I · Allegro non molto">Vivaldi · Winter</button>
+          <button id="libOpenFile">Open a file…</button>
+        </div>
+        <div id="libStatus"></div>
+        <div id="libResults"></div>
+        <div class="lib-note">Streams public-domain recordings from archive.org</div>
       </div>
     </div>
 

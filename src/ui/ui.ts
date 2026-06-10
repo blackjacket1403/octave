@@ -176,6 +176,10 @@ export class UI {
     wake();
   }
 
+  openFilePicker(): void {
+    this.fileInput.click();
+  }
+
   // ---- state pushed from the app ----
 
   trackLoaded(name: string): void {

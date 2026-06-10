@@ -5,6 +5,7 @@ import type { AnalysisFrame } from './audio/analysis';
 import type { Mode } from './modes/Mode';
 import { getMode, modeRegistry } from './modes/registry';
 import { UI } from './ui/ui';
+import { Library } from './ui/library';
 import { renderDemoPiece } from './demo/demoPiece';
 
 // ---------------------------------------------------------------------------
@@ -85,6 +86,13 @@ async function loadFile(file: File): Promise<void> {
   }
 }
 
+const library = new Library({
+  onTrackUrl: (url, name) => void loadUrl(url, name),
+  onOpenFile: () => ui.openFilePicker(),
+});
+document.getElementById('libBtn')?.addEventListener('click', () => library.open());
+document.getElementById('libBtnLanding')?.addEventListener('click', () => library.open());
+
 async function loadUrl(url: string, name: string): Promise<void> {
   const eng = ensureEngine();
   try {
@@ -124,17 +132,30 @@ async function loadDemo(): Promise<void> {
 let dragging = false;
 let lookX = 0;
 let lookY = 0;
+let downX = 0;
+let downY = 0;
+let dragDist = 0;
+const ndcX = (e: PointerEvent) => (e.clientX / window.innerWidth) * 2 - 1;
+const ndcY = (e: PointerEvent) => -((e.clientY / window.innerHeight) * 2 - 1);
 canvas.addEventListener('pointerdown', (e) => {
   dragging = true;
+  dragDist = 0;
+  downX = e.clientX;
+  downY = e.clientY;
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointermove', (e) => {
+  activeMode?.setPointer?.(ndcX(e), ndcY(e));
   if (!dragging) return;
+  dragDist = Math.max(dragDist, Math.hypot(e.clientX - downX, e.clientY - downY));
   lookX = Math.max(-1, Math.min(1, lookX - (e.movementX / window.innerWidth) * 2.2));
   lookY = Math.max(-1, Math.min(1, lookY + (e.movementY / window.innerHeight) * 2.2));
   activeMode?.setLook?.(lookX, lookY);
 });
-canvas.addEventListener('pointerup', () => (dragging = false));
+canvas.addEventListener('pointerup', (e) => {
+  dragging = false;
+  if (dragDist < 8) activeMode?.tap?.(ndcX(e), ndcY(e));
+});
 canvas.addEventListener('dblclick', () => {
   lookX = 0;
   lookY = 0;
@@ -156,13 +177,13 @@ let lastQualityChange = 0;
 
 function watchPerformance(dtMs: number, now: number): void {
   frameTimeAvg += (dtMs - frameTimeAvg) * 0.05; // rolling window ≈ 20 frames
-  if (now - lastQualityChange < 4000) return;
+  if (now - lastQualityChange < 8000) return;
   if (frameTimeAvg > 20 && quality > 0) {
     quality--;
     activeMode?.setQuality?.(quality);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality === 1 ? 1.5 : 1));
     lastQualityChange = now;
-  } else if (frameTimeAvg < 12 && quality < 2) {
+  } else if (frameTimeAvg < 10.5 && quality < 2) {
     quality++;
     activeMode?.setQuality?.(quality);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality === 2 ? 2 : 1.5));

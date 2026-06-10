@@ -518,7 +518,7 @@ export class Celestial implements Mode {
       );
       const mesh = new THREE.Mesh(bodyGeo, mat);
       mesh.frustumCulled = false;
-      const trail = new TrailRibbon(96, 0.04);
+      const trail = new TrailRibbon(120, 0); // per-frame sampling, no stepping
       const body: OrbitBody = {
         azimuth: (b / BAND_COUNT) * Math.PI * 2,
         elevation: ELEV_BASE[b],
