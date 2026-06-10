@@ -57,9 +57,13 @@ export class LuminousHall implements Mode {
   private colors: THREE.Color[] = [];
   private scratchColor = new THREE.Color();
 
+  private camera!: THREE.PerspectiveCamera;
+
   init(scene: THREE.Scene, renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
     this.scene = scene;
     this.renderer = renderer;
+    this.camera = camera;
+    this.applyFov(camera.aspect);
     const rng = mulberry32(0x0c7a5e);
     this.atmosphere = new Atmosphere(rng);
     this.group.add(this.atmosphere.group);
@@ -163,8 +167,14 @@ export class LuminousHall implements Mode {
     this.rig.update(dt, frame.energySlow);
   }
 
-  resize(_w: number, _h: number): void {
-    /* no internal render targets */
+  /** Portrait screens get a taller view so the whole arc still fits. */
+  private applyFov(aspect: number): void {
+    this.camera.fov = aspect < 1 ? 76 : 55;
+    this.camera.updateProjectionMatrix();
+  }
+
+  resize(w: number, h: number): void {
+    this.applyFov(w / h);
   }
 
   setQuality(level: number): void {

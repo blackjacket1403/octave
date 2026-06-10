@@ -50,6 +50,15 @@ export class UI {
     this.wireLanding();
     this.wireTransport();
     this.wireIdleHide();
+
+    // touch devices: no drag-and-drop, no Fullscreen API on iPhone
+    if (window.matchMedia('(pointer: coarse)').matches) {
+      const main = this.dropzone.querySelector('.dz-main');
+      const sub = this.dropzone.querySelector('.dz-sub');
+      if (main) main.textContent = 'Tap to choose a recording';
+      if (sub) sub.textContent = 'mp3 · flac · wav · ogg';
+    }
+    if (!document.fullscreenEnabled) this.fsBtn.style.display = 'none';
   }
 
   private populateModes(): void {

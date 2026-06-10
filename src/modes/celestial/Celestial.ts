@@ -133,7 +133,7 @@ export class Celestial implements Mode {
     this.renderer = renderer;
     this.camera = camera;
     this.savedFov = camera.fov;
-    camera.fov = 68;
+    camera.fov = camera.aspect < 1 ? 88 : 68;
     camera.position.set(0, 1.6, 0);
     camera.updateProjectionMatrix();
     this.aspect = camera.aspect;
@@ -340,6 +340,8 @@ export class Celestial implements Mode {
 
   resize(w: number, h: number): void {
     this.aspect = w / h;
+    this.camera.fov = this.aspect < 1 ? 88 : 68;
+    this.camera.updateProjectionMatrix();
   }
 
   setQuality(level: number): void {

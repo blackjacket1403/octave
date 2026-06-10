@@ -145,7 +145,12 @@ canvas.addEventListener('dblclick', () => {
 // adaptive quality: degrade gracefully if frame time exceeds ~20ms sustained
 // ---------------------------------------------------------------------------
 
-let quality = 2;
+// start conservatively on phones/tablets and weak machines; the watchdog
+// promotes quality again if the device turns out to be fast
+const isCoarse = window.matchMedia('(pointer: coarse)').matches;
+const weakHints = isCoarse || (navigator.hardwareConcurrency ?? 8) <= 4;
+let quality = weakHints ? 1 : 2;
+if (weakHints) renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 let frameTimeAvg = 16.7;
 let lastQualityChange = 0;
 
